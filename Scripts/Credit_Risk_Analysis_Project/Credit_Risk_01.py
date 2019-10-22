@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns 
 import scipy
 
+import xgboost as xgb
+
 # Estimadors.
 
 from sklearn.ensemble import RandomForestRegressor
@@ -45,8 +47,27 @@ from sklearn.ensemble import RandomForestClassifier , GradientBoostingClassifier
 from sklearn.linear_model import SGDClassifier 
 from sklearn.metrics import f1_score
 from sklearn.neighbors import KNeighborsClassifier
+from xgboost import XGBClassifier
+
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import KFold
 
 from sklearn.model_selection import cross_val_score
+
+# To upsample - downsample
+
+from sklearn.utils import resample
+
+ 
+# ROC Curve.
+
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
+plt.style.use('ggplot')
+%matplotlib inline
+
+from sklearn.calibration import CalibratedClassifierCV,calibration_curve
+
 
 
 # Set default matplot figure size
@@ -390,10 +411,9 @@ credit_3['client_quality'] = credit_3.iloc[:,6:12].sum(axis=1)
 
 credit_3['client_quality_2'] = credit_3.iloc[:,6]*2 + credit_3.iloc[:,7]*1.8 + credit_3.iloc[:,8]*1.6 + credit_3.iloc[:,9]*1.4 + credit_3.iloc[:,10]*1.2 + credit_3.iloc[:,11]*1 
 
-credit_3['client_quality_3'] = np.where((credit_3['DEFAULT'] == 0) & (credit_3['client_quality_2'] < 0), 'SOLVENT', 'DEFAULTER')
+credit_3['client_quality_3'] = np.where((credit_3['client_quality'] < 0) & (credit_3['client_quality_2'] < 0), 'SOLVENT', 'DEFAULTER')
 
 credit_3['client_quality_4'] = np.where(credit_3['client_quality_2'] < 2, 'SOLVENT', 'DEFAULTER')
-
 
 
 
@@ -406,6 +426,8 @@ credit_3['client_quality_4'] = np.where(credit_3['client_quality_2'] < 2, 'SOLVE
 # features
 
 features_model_1 = credit_3.iloc[:,[2,6,7,8,9,10,11,-4,-3]]
+
+features_model_1['SEX'] = features_model_1['SEX'].astype('category')
 
 features_model_1.head()
 
@@ -454,11 +476,23 @@ X_train_model_1.shape, X_test_model_1.shape
 # Models.
 
 modelGB_1 = GradientBoostingClassifier()
+
 modelSVM_1 = SGDClassifier()
+
+modelSVM_X = SGDClassifier(loss='hinge',class_weight='balanced')
+clf = modelSVM_X.fit(X_train_model_1, y_train_model_1)
+calibrator_model1 = CalibratedClassifierCV(clf, cv='prefit')
+model1 =calibrator_model1.fit(X_train_model_1, y_train_model_1)
+
 modelRF_1 = RandomForestClassifier(n_estimators=100, max_depth=2,random_state=0)
+
 modelADA_1 = AdaBoostClassifier()
+
 ModelDT_1 = DecisionTreeClassifier()
+
 modelKNN_1 = KNeighborsClassifier()
+
+modelXGBClassifier_1 = XGBClassifier()
 
 
 # Training the models.
@@ -477,6 +511,8 @@ modelGB_1.fit(X_train_model_1,y_train_model_1)
 
 modelSVM_1.fit(X_train_model_1,y_train_model_1)
 
+model1.fit(X_train_model_1,y_train_model_1)
+
 
 # Decision Tree.
 
@@ -490,6 +526,17 @@ modelRF_1.fit(X_train_model_1,y_train_model_1)
 
 modelADA_1.fit(X_train_model_1,y_train_model_1)
 
+# KNN.
+
+modelKNN_1.fit(X_train_model_1,y_train_model_1)
+
+# XGBClassifier
+
+X_train_model_1_bool = X_train_model_1.copy()
+X_train_model_1_bool['SEX'] = X_train_model_1_bool['SEX'].astype('bool')
+
+modelXGBClassifier_1.fit(X_train_model_1_bool,y_train_model_1)
+
 
 
 modelGB_1.score(X_train_model_1,y_train_model_1)
@@ -500,8 +547,14 @@ modelRF_1.score(X_train_model_1,y_train_model_1)
 
 modelSVM_1.score(X_train_model_1,y_train_model_1)
 
+model1.score(X_train_model_1,y_train_model_1)
+
 modelADA_1.score(X_train_model_1,y_train_model_1)
            
+modelKNN_1.score(X_train_model_1,y_train_model_1)
+
+modelXGBClassifier_1.score(X_train_model_1_bool,y_train_model_1)
+
 
 
 # Making predictions.
@@ -514,7 +567,19 @@ predictions_modelRF_1 = modelRF_1.predict(X_test_model_1)
 
 predictions_modelSVM_1 = modelSVM_1.predict(X_test_model_1)
 
+predictions_model1 = model1.predict(X_test_model_1)
+
 predictions_modelADA_1 = modelADA_1.predict(X_test_model_1)
+
+predictions_modelKNN_1 = modelKNN_1.predict(X_test_model_1)
+
+
+X_test_model_1_bool = X_test_model_1.copy()
+X_test_model_1_bool['SEX'] = X_test_model_1_bool['SEX'].astype('bool')
+
+predictions_modelXGBClassifier_1 = modelXGBClassifier_1.predict(X_test_model_1_bool)
+
+
 
 
 # Evaluating the results.
@@ -531,9 +596,50 @@ confusion_matrix(y_test_model_1, predictions_modelRF_1)
 
 confusion_matrix(y_test_model_1, predictions_modelSVM_1)
 
+confusion_matrix(y_test_model_1, predictions_model1)
+
 confusion_matrix(y_test_model_1, predictions_modelADA_1)
 
+confusion_matrix(y_test_model_1, predictions_modelKNN_1)
 
+confusion_matrix(y_test_model_1, predictions_modelXGBClassifier_1)
+
+
+# ROC Curve.
+
+predictions_model1_probabilities = model1.predict_proba(X_test_model_1)[:,1]
+
+fpr, tpr, _ = roc_curve(y_test_model_1, predictions_model1_probabilities)
+roc_auc_model1 = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange',
+         lw=2, label='ROC curve (area = %0.2f)' % roc_auc_model1)
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.legend(loc="lower right")
+plt.show()
+
+# Calculating TP,FP, TN, FN manually.
+
+TP = np.sum(np.logical_and(predictions_model1 == 0, y_test_model_1 == 0))
+TN = np.sum(np.logical_and(predictions_model1 == 1, y_test_model_1 == 1))
+FP = np.sum(np.logical_and(predictions_model1 == 0, y_test_model_1 == 1))
+FN = np.sum(np.logical_and(predictions_model1 == 1, y_test_model_1 == 0))
+pred_model1 = len(predictions_model1)
+pred_model1
+
+print('True Positives: {}'.format(TP))
+print('False Positive: {}'.format(FP))
+print('True Negative: {}'.format(TN))
+print('False Negative: {}'.format(FN))
+print('Precision: {}'.format(round(TP/(TP+FP),2)))
+print('Recall: {}'.format(round(TP/(TP+FN),2)))
+print('Problematic ratio: {}'.format(round(FN/(FN+TP),2)))
 
 
 # Model 2-------------------------
@@ -544,7 +650,7 @@ credit_4['client_quality'] = credit_4.iloc[:,6:12].sum(axis=1)
 
 credit_4['client_quality_2'] = credit_4.iloc[:,6]*2 + credit_4.iloc[:,7]*1.8 + credit_4.iloc[:,8]*1.6 + credit_4.iloc[:,9]*1.4 + credit_4.iloc[:,10]*1.2 + credit_4.iloc[:,11]*1 
 
-credit_4['client_quality_3'] = np.where((credit_4['DEFAULT'] == 0) & (credit_4['client_quality_2'] < 0), 0, 1)
+credit_4['client_quality_3'] = np.where((credit_4['client_quality'] < 0) & (credit_4['client_quality_2'] < 0), 0, 1)
 
 credit_4['client_quality_4'] = np.where(credit_4['client_quality_2'] < 2, 0, 1)
 
@@ -557,9 +663,9 @@ features_model_2 = credit_4.iloc[:,[2,6,7,8,9,10,11,-4,-3,-2,-1]]
 
 features_model_2.head()
 
-features_model_2['client_quality_3'] = features_model_2['client_quality_3'].astype('object')
+features_model_2['client_quality_3'] = features_model_2['client_quality_3'].astype('category')
 
-features_model_2['client_quality_4'] = features_model_2['client_quality_4'].astype('object')
+features_model_2['client_quality_4'] = features_model_2['client_quality_4'].astype('category')
 
 # dependent variable
 
@@ -595,6 +701,8 @@ modelRF_2 = RandomForestClassifier(n_estimators=100,random_state=0)
 modelADA_2 = AdaBoostClassifier()
 ModelDT_2 = DecisionTreeClassifier()
 modelKNN_2 = KNeighborsClassifier()
+modelXGBClassifier_2 = XGBClassifier()
+
 
 
 # Training the models.
@@ -632,6 +740,15 @@ modelADA_2.fit(X_train_model_2,y_train_model_2)
 
 modelKNN_2.fit(X_train_model_2,y_train_model_2)
 
+# modelXGBClassifier
+
+X_train_model_2_bool = X_train_model_2.copy()
+X_train_model_2_bool['SEX'] = X_train_model_2_bool['SEX'].astype('bool')
+X_train_model_2_bool['client_quality_3'] = X_train_model_2_bool['client_quality_3'].astype('bool')
+X_train_model_2_bool['client_quality_4'] = X_train_model_2_bool['client_quality_4'].astype('bool')
+
+modelXGBClassifier_2.fit(X_train_model_2_bool,y_train_model_2)
+
 
 
 modelGB_2.score(X_train_model_2,y_train_model_2)
@@ -645,6 +762,8 @@ modelSVM_2.score(X_train_model_2,y_train_model_2)
 modelADA_2.score(X_train_model_2,y_train_model_2)
 
 modelKNN_2.score(X_train_model_2,y_train_model_2)
+
+modelXGBClassifier_2.score(X_train_model_2_bool,y_train_model_2)
            
 
 
@@ -661,6 +780,14 @@ predictions_modelSVM_2= modelSVM_2.predict(X_test_model_2)
 predictions_modelADA_2= modelADA_2.predict(X_test_model_2)
 
 predictions_modelKNN_2= modelKNN_2.predict(X_test_model_2)
+
+X_test_model_2_bool = X_test_model_2.copy()
+X_test_model_2_bool['SEX'] = X_test_model_2_bool['SEX'].astype('bool')
+X_test_model_2_bool['client_quality_3'] = X_test_model_2_bool['client_quality_3'].astype('bool')
+X_test_model_2_bool['client_quality_4'] = X_test_model_2_bool['client_quality_4'].astype('bool')
+
+predictions_modelXGBClassifier_2 = modelXGBClassifier_2.predict(X_test_model_2_bool)
+
 
 
 # Evaluating the results.
@@ -681,12 +808,23 @@ confusion_matrix(y_test_model_2, predictions_modelADA_2)
 
 confusion_matrix(y_test_model_2, predictions_modelKNN_2)
 
+confusion_matrix(y_test_model_2, predictions_modelXGBClassifier_2)
+
+
 
 # Model 3-------------------------
 
 # features
 
 features_model_3 = credit_4.iloc[:,[2,3,-4,-3,-2,-1]]
+
+features_model_3['SEX'] = features_model_3['SEX'].astype('category')
+
+features_model_3['EDUCATION'] = features_model_3['EDUCATION'].astype('category')
+
+features_model_3['client_quality_3'] = features_model_3['client_quality_3'].astype('category')
+
+features_model_3['client_quality_4'] = features_model_3['client_quality_4'].astype('category')
 
 features_model_3.head()
 
@@ -724,6 +862,7 @@ modelRF_3 = RandomForestClassifier(n_estimators=100,random_state=0)
 modelADA_3 = AdaBoostClassifier(n_estimators=50,learning_rate=1)
 ModelDT_3 = DecisionTreeClassifier()
 modelKNN_3 = KNeighborsClassifier()
+modelXGBClassifier_3 = XGBClassifier()
 
 
 # Training the models.
@@ -761,6 +900,17 @@ modelADA_3.fit(X_train_model_3, y_train_model_3)
 
 modelKNN_3.fit(X_train_model_3, y_train_model_3)
 
+# XGBClassifier.
+
+X_train_model_3_bool = X_train_model_3.copy()
+X_train_model_3_bool['SEX'] = X_train_model_3_bool['SEX'].astype('bool')
+X_train_model_3_bool['EDUCATION'] = X_train_model_3_bool['EDUCATION'].astype('bool')
+X_train_model_3_bool['client_quality_3'] = X_train_model_3_bool['client_quality_3'].astype('bool')
+X_train_model_3_bool['client_quality_4'] = X_train_model_3_bool['client_quality_4'].astype('bool')
+
+modelXGBClassifier_3.fit(X_train_model_3_bool,y_train_model_3)
+
+
 
 
 
@@ -775,6 +925,8 @@ modelSVM_3.score(X_train_model_3,y_train_model_3)
 modelADA_3.score(X_train_model_3,y_train_model_3)
 
 modelKNN_3.score(X_train_model_3,y_train_model_3)
+
+modelXGBClassifier_3.score(X_train_model_3_bool,y_train_model_3)
            
 
 
@@ -791,6 +943,15 @@ predictions_modelSVM_3 = modelSVM_3.predict(X_test_model_3)
 predictions_modelADA_3 = modelADA_3.predict(X_test_model_3)
 
 predictions_modelKNN_3 = modelKNN_3.predict(X_test_model_3)
+
+
+X_test_model_3_bool = X_test_model_3.copy()
+X_test_model_3_bool['SEX'] = X_test_model_3_bool['SEX'].astype('bool')
+X_test_model_3_bool['EDUCATION'] = X_test_model_3_bool['EDUCATION'].astype('bool')
+X_test_model_3_bool['client_quality_3'] = X_test_model_3_bool['client_quality_3'].astype('bool')
+X_test_model_3_bool['client_quality_4'] = X_test_model_3_bool['client_quality_4'].astype('bool')
+
+prediction_modelXGBClassifier_3 = modelXGBClassifier_3.predict(X_test_model_3_bool)
 
 
 # Evaluating the results.
@@ -811,21 +972,567 @@ confusion_matrix(y_test_model_3, predictions_modelADA_3)
 
 confusion_matrix(y_test_model_3, predictions_modelKNN_3)
 
+confusion_matrix(y_test_model_3, prediction_modelXGBClassifier_3)
 
-# Model 4-------------------------
+
+
+# ROC Curve.
+
+predictions_modelRF_3_probabilities = modelRF_3.predict_proba(X_test_model_3)[:,1]
+
+fpr, tpr, _ = roc_curve(y_test_model_3, predictions_modelRF_3_probabilities)
+roc_auc_model1 = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange',
+         lw=2, label='ROC curve (area = %0.2f)' % roc_auc_model1)
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.legend(loc="lower right")
+plt.show()
+
+
+
+# Model 4 - Solving the class imbalance problem.------------------
+
+
+# Merging X_train and y_train
+
+train_3 = X_train_model_3.join(y_train_model_3)
+
+train_3_solvent = train_3[train_3.DEFAULT==0]
+train_3_defaulter = train_3[train_3.DEFAULT==1]
+
+
+train_3_defaulter_upsampled = resample(train_3_defaulter, replace=True, n_samples=16330, random_state=587)
+
+# Combine solvent class with upsampled defaulter class
+
+train_3_upsampled = pd.concat([train_3_solvent, train_3_defaulter_upsampled])
+
+# New class counts
+
+train_3_upsampled.DEFAULT.value_counts()
+
+
+# Models.
+
+modelGB_4 = GradientBoostingClassifier()
+modelSVM_4 = SGDClassifier()
+modelRF_4 = RandomForestClassifier(n_estimators = 100, class_weight = "balanced")
+modelADA_4 = AdaBoostClassifier(n_estimators=50,learning_rate=1)
+ModelDT_4 = DecisionTreeClassifier(max_depth = 5, class_weight = "balanced")
+modelKNN_4 = KNeighborsClassifier()
+
+
+# Training the models.
+
+y_train_model_4 = train_3_upsampled['DEFAULT']
+
+y_train_model_4 = y_train_model_4.astype("category") 
+
+y_test_model_4 = y_test_model_3.copy()
+
+y_test_model_4 = y_test_model_4.astype("category") 
+
+X_train_model_4 = train_3_upsampled.iloc[:,[0,1,2,3,4,5]]
+
+X_train_model_4['SEX'] = X_train_model_4['SEX'].astype('category')
+
+X_train_model_4['EDUCATION'] = X_train_model_4['EDUCATION'].astype('category')
+
+X_train_model_4['client_quality_3'] = X_train_model_4['client_quality_3'].astype('category')
+
+X_train_model_4['client_quality_4'] = X_train_model_4['client_quality_4'].astype('category')
+
+
+# Gradient Bossting.
+
+modelGB_4.fit(X_train_model_4,y_train_model_4)
+
+
+# SVM - SGD Classifier.
+
+modelSVM_4.fit(X_train_model_4,y_train_model_4)
+
+
+# Decision Tree.
+
+ModelDT_4.fit(X_train_model_4,y_train_model_4)
+
+# Random Forest.
+
+modelRF_4.fit(X_train_model_4,y_train_model_4)
+
+
+# ADA Classifier.
+
+modelADA_4.fit(X_train_model_4, y_train_model_4)
+
+
+# KNN Classifier.
+
+modelKNN_4.fit(X_train_model_4, y_train_model_4)
+
+
+
+
+modelGB_4.score(X_train_model_4,y_train_model_4)
+
+ModelDT_4.score(X_train_model_4,y_train_model_4)
+
+modelRF_4.score(X_train_model_4,y_train_model_4)
+
+modelSVM_4.score(X_train_model_4,y_train_model_4)
+
+modelADA_4.score(X_train_model_4,y_train_model_4)
+
+modelKNN_4.score(X_train_model_4,y_train_model_4)
+           
+
+
+# Making predictions.
+
+predictions_modelGB_4 = modelGB_4.predict(X_test_model_3)
+
+predictions_ModelDT_4 = ModelDT_4.predict(X_test_model_3)
+
+predictions_modelRF_4 = modelRF_4.predict(X_test_model_3)
+
+predictions_modelSVM_4 = modelSVM_4.predict(X_test_model_3)
+
+predictions_modelADA_4 = modelADA_4.predict(X_test_model_3)
+
+predictions_modelKNN_4 = modelKNN_4.predict(X_test_model_3)
+
+
+# Evaluating the results.
+
+from sklearn.metrics import accuracy_score
+
+from sklearn.metrics import confusion_matrix
+
+confusion_matrix(y_test_model_3, predictions_modelGB_4)
+
+confusion_matrix(y_test_model_3, predictions_ModelDT_4)
+
+confusion_matrix(y_test_model_3, predictions_modelRF_4)
+
+confusion_matrix(y_test_model_3, predictions_modelSVM_4)
+
+confusion_matrix(y_test_model_3, predictions_modelADA_4)
+
+confusion_matrix(y_test_model_3, predictions_modelKNN_4)
+
+
+# ROC Curve.
+
+predictions_modelADA_4_probabilities = modelADA_4.predict_proba(X_test_model_3)[:,1]
+
+fpr, tpr, _ = roc_curve(y_test_model_3, predictions_modelADA_4_probabilities)
+roc_auc_model1 = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange',
+         lw=2, label='ROC curve (area = %0.2f)' % roc_auc_model1)
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.legend(loc="lower right")
+plt.show()
+
+
+
+
+# Model 5 -------------------------
 
 # features
 
-features_model_4 = credit_4.iloc[:,[2,6,7,8,9,10,11,-4,-3,-2,-1]]
-
-features_model_3.head()
+credit_5 = credit_4.copy()
 
 
+credit_5['AGE_GROUP'] = 0 #creates a column of 0
+credit_5.loc[((credit_5['AGE'] > 20) & (credit_5['AGE'] < 27)) , 'AGE_GROUP'] = 1
+credit_5.loc[((credit_5['AGE'] >= 27) & (credit_5['AGE'] < 38)) , 'AGE_GROUP'] = 2
+credit_5.loc[((credit_5['AGE'] >= 38) & (credit_5['AGE'] < 45)) , 'AGE_GROUP'] = 3
+credit_5.loc[((credit_5['AGE'] >= 45) & (credit_5['AGE'] < 60)) , 'AGE_GROUP'] = 4
+credit_5.loc[(credit_5['AGE'] >= 60) , 'AGE_GROUP'] = 5
+
+
+credit_5['SEX_AGE_GROUP'] = 0
+credit_5.loc[((credit_5.SEX == 1) & (credit_5.AGE_GROUP == 1)) , 'SEX_AGE_GROUP'] = 11 # Male Teen
+credit_5.loc[((credit_5.SEX == 2) & (credit_5.AGE_GROUP == 1)) , 'SEX_AGE_GROUP'] = 21 # Female Teen
+credit_5.loc[((credit_5.SEX == 1) & (credit_5.AGE_GROUP == 2)) , 'SEX_AGE_GROUP'] = 12 # Male Adult
+credit_5.loc[((credit_5.SEX == 2) & (credit_5.AGE_GROUP == 2)) , 'SEX_AGE_GROUP'] = 22 # Female Adult
+credit_5.loc[((credit_5.SEX == 1) & (credit_5.AGE_GROUP == 3)) , 'SEX_AGE_GROUP'] = 13 # Male Senior
+credit_5.loc[((credit_5.SEX == 2) & (credit_5.AGE_GROUP == 3)) , 'SEX_AGE_GROUP'] = 23 # Female Senior
+credit_5.loc[((credit_5.SEX == 1) & (credit_5.AGE_GROUP == 4)) , 'SEX_AGE_GROUP'] = 14 # Male Retiree
+credit_5.loc[((credit_5.SEX == 2) & (credit_5.AGE_GROUP == 4)) , 'SEX_AGE_GROUP'] = 24 # Female Retiree
+credit_5.loc[((credit_5.SEX == 1) & (credit_5.AGE_GROUP == 5)) , 'SEX_AGE_GROUP'] = 15 # Male Elder.
+credit_5.loc[((credit_5.SEX == 2) & (credit_5.AGE_GROUP == 5)) , 'SEX_AGE_GROUP'] = 25 # Female Elder.
+
+credit_5['AGE_GROUP'] = credit_5['AGE_GROUP'].astype('category')
+
+credit_5.AGE_GROUP.hist()
+
+
+credit_5['SEX_AGE_GROUP'] = credit_5['SEX_AGE_GROUP'].astype('category')
+
+credit_5.SEX_AGE_GROUP.hist()
+
+features_model_5 = credit_5.iloc[:,[2,4,-6,-5,-4,-3,-1]]
+
+features_model_5['SEX'] = features_model_5['SEX'].astype('category')
+
+features_model_5['MARRIAGE'] = features_model_5['MARRIAGE'].astype('category')
+
+features_model_5['client_quality_3'] = features_model_5['client_quality_3'].astype('category')
+
+features_model_5['client_quality_4'] = features_model_5['client_quality_4'].astype('category')
+
+
+features_model_5.head()
+
+
+
+# dependent variable
+
+depVar_model_5 = credit_5['DEFAULT']
+
+
+#Training Set (Feature Space: X Training)
+
+X_train_model_5 = (features_model_5[: 30000])
+
+
+#Dependent Variable Training Set (y Training)
+
+y_train_model_5 = depVar_model_5[: 30000]
+
+
+
+X_train_model_5, X_test_model_5, y_train_model_5, y_test_model_5 = train_test_split(X_train_model_5, y_train_model_5, test_size=0.3, random_state=1816)
+
+X_train_model_5.shape, X_test_model_5.shape
+
+
+# modelLinear_1 = LinearRegression(n_jobs=10)
+
+
+# Models.
+
+modelGB_5 = GradientBoostingClassifier()
+modelSVM_5 = SGDClassifier()
+modelRF_5 = RandomForestClassifier(n_estimators=100,random_state=0)
+modelADA_5 = AdaBoostClassifier(n_estimators=50,learning_rate=1)
+ModelDT_5 = DecisionTreeClassifier()
+modelKNN_5 = KNeighborsClassifier()
+
+
+
+# Training the models.
+
+y_train_model_5 = y_train_model_5.astype("category") 
+
+y_test_model_5 = y_test_model_5.astype("category") 
+
+
+# Gradient Bossting.
+
+modelGB_5.fit(X_train_model_5,y_train_model_5)
+
+
+# SVM - SGD Classifier.
+
+modelSVM_5.fit(X_train_model_5,y_train_model_5)
+
+
+# Decision Tree.
+
+ModelDT_5.fit(X_train_model_5,y_train_model_5)
+
+# Random Forest.
+
+modelRF_5.fit(X_train_model_5,y_train_model_5)
+
+
+# ADA Classifier.
+
+modelADA_5.fit(X_train_model_5, y_train_model_5)
+
+
+# KNN Classifier.
+
+modelKNN_5.fit(X_train_model_5, y_train_model_5)
+
+
+
+
+modelGB_5.score(X_train_model_5,y_train_model_5)
+
+ModelDT_5.score(X_train_model_5,y_train_model_5)
+
+modelRF_5.score(X_train_model_5,y_train_model_5)
+
+modelSVM_5.score(X_train_model_5,y_train_model_5)
+
+modelADA_5.score(X_train_model_5,y_train_model_5)
+
+modelKNN_5.score(X_train_model_5,y_train_model_5)
+           
+
+
+# Making predictions.
+
+predictions_modelGB_5 = modelGB_5.predict(X_test_model_5)
+
+predictions_ModelDT_5 = ModelDT_5.predict(X_test_model_5)
+
+predictions_modelRF_5 = modelRF_5.predict(X_test_model_5)
+
+predictions_modelSVM_5 = modelSVM_5.predict(X_test_model_5)
+
+predictions_modelADA_5 = modelADA_5.predict(X_test_model_5)
+
+predictions_modelKNN_5 = modelKNN_5.predict(X_test_model_5)
+
+
+# Evaluating the results.
+
+from sklearn.metrics import accuracy_score
+
+from sklearn.metrics import confusion_matrix
+
+confusion_matrix(y_test_model_5, predictions_modelGB_5)
+
+confusion_matrix(y_test_model_5, predictions_ModelDT_5)
+
+confusion_matrix(y_test_model_5, predictions_modelRF_5)
+
+confusion_matrix(y_test_model_5, predictions_modelSVM_5)
+
+confusion_matrix(y_test_model_5, predictions_modelADA_5)
+
+confusion_matrix(y_test_model_5, predictions_modelKNN_5)
+
+
+
+# Model 6 - Dealing con Class Imbalance Problem.
+
+# Merging X_train and y_train
+
+train_6 = X_train_model_5.join(y_train_model_5)
+
+train_6_solvent = train_6[train_6.DEFAULT==0]
+train_6_defaulter = train_6[train_6.DEFAULT==1]
+
+
+train_6_defaulter_upsampled = resample(train_6_defaulter, replace=True, n_samples=16330, random_state=587)
+
+# Combine solvent class with upsampled defaulter class
+
+train_6_upsampled = pd.concat([train_6_solvent, train_6_defaulter_upsampled])
+
+# New class counts
+
+train_6_upsampled.DEFAULT.value_counts()
+
+
+# Models.
+
+modelGB_6 = GradientBoostingClassifier()
+modelSVM_6 = SGDClassifier()
+modelRF_6 = RandomForestClassifier(n_estimators = 100, class_weight = "balanced")
+modelADA_6 = AdaBoostClassifier(n_estimators=50,learning_rate=1)
+ModelDT_6 = DecisionTreeClassifier(max_depth = 5, class_weight = "balanced")
+modelKNN_6 = KNeighborsClassifier()
+
+
+# Training the models.
+
+y_train_model_6 = train_6_upsampled['DEFAULT']
+
+y_train_model_6 = y_train_model_6.astype("category") 
+
+y_test_model_5 = y_test_model_5.copy()
+
+y_test_model_5 = y_test_model_5.astype("category") 
+
+X_train_model_6 = train_6_upsampled.iloc[:,[0,1,2,3,4,5,6]]
+
+
+# Gradient Bossting.
+
+modelGB_6.fit(X_train_model_6,y_train_model_6)
+
+
+# SVM - SGD Classifier.
+
+modelSVM_6.fit(X_train_model_6,y_train_model_6)
+
+
+# Decision Tree.
+
+ModelDT_6.fit(X_train_model_6,y_train_model_6)
+
+# Random Forest.
+
+modelRF_6.fit(X_train_model_6,y_train_model_6)
+
+
+# ADA Classifier.
+
+modelADA_6.fit(X_train_model_6, y_train_model_6)
+
+
+# KNN Classifier.
+
+modelKNN_6.fit(X_train_model_6, y_train_model_6)
+
+
+
+
+modelGB_6.score(X_train_model_6,y_train_model_6)
+
+ModelDT_6.score(X_train_model_6,y_train_model_6)
+
+modelRF_6.score(X_train_model_6,y_train_model_6)
+
+modelSVM_6.score(X_train_model_6,y_train_model_6)
+
+modelADA_6.score(X_train_model_6,y_train_model_6)
+
+modelKNN_6.score(X_train_model_6,y_train_model_6)
+           
+
+
+# Making predictions.
+
+predictions_modelGB_6 = modelGB_6.predict(X_test_model_5)
+
+predictions_ModelDT_6 = ModelDT_6.predict(X_test_model_5)
+
+predictions_modelRF_6 = modelRF_6.predict(X_test_model_5)
+
+predictions_modelSVM_6 = modelSVM_6.predict(X_test_model_5)
+
+predictions_modelADA_6 = modelADA_6.predict(X_test_model_5)
+
+predictions_modelKNN_6 = modelKNN_6.predict(X_test_model_5)
+
+
+# Evaluating the results.
+
+from sklearn.metrics import accuracy_score
+
+from sklearn.metrics import confusion_matrix
+
+confusion_matrix(y_test_model_5, predictions_modelGB_6)
+
+confusion_matrix(y_test_model_5, predictions_ModelDT_6)
+
+confusion_matrix(y_test_model_5, predictions_modelRF_6)
+
+confusion_matrix(y_test_model_5, predictions_modelSVM_6)
+
+confusion_matrix(y_test_model_5, predictions_modelADA_6)
+
+confusion_matrix(y_test_model_5, predictions_modelKNN_6)
+
+
+# ROC Curve.
+
+predictions_modelADA_6_probabilities = modelADA_6.predict_proba(X_test_model_5)[:,1]
+
+fpr, tpr, _ = roc_curve(y_test_model_5, predictions_modelADA_6_probabilities)
+roc_auc_model1 = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange',
+         lw=2, label='ROC curve (area = %0.2f)' % roc_auc_model1)
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.legend(loc="lower right")
+plt.show()
 
 
 
 
 
+
+# Gianmarco Insights.
+
+
+#create dictionary with var importance
+vars_imp = {}
+
+for i in range(len(modelRF_3.feature_importances_)):
+    vars_imp['var'+str(i+1)] = modelRF_5.feature_importances_[i]
+
+#sort vars_imp by decreasing order
+    
+import operator
+
+sorted_vars_imp = sorted(vars_imp.items(), key=operator.itemgetter(1), reverse=True)
+
+sorted_vars_imp
+
+
+
+
+# Tunning hyperparameters of SVM.
+
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.metrics import  make_scorer, recall_score
+import time
+
+start_time = time.time()
+
+#define model
+classifier = SVC(kernel ='linear', C=1, gamma=1)
+
+# DEFINE MODEL AND PERFORMANCE MEASURE
+### Recall has been chosen since we want to minimize FN
+###recall = TP / (TN+FN)
+recall_ = make_scorer(recall_score)
+
+# GRID SEARCH FOR n COMBINATIONS OF PARAMETERS
+# grid_list = {"C": np.arange(2, 10, 4),
+#              "gamma": np.arange(0.1, 1, 0.4),
+#              "kernel": ['linear', 'poly']}
+
+# RBF kernel radial basis function kernel
+grid_list_2 = {"C": np.arange(1, 20, 1),
+               "gamma": np.arange(0.1, 1, 0.01),
+               "kernel": ['linear', 'poly', 'rbf', 'sigmoid']
+              }
+
+grid_search = GridSearchCV(classifier, param_grid = grid_list_2, n_jobs = -1, cv = 10, scoring = recall_)
+grid_search.fit(X_train, y_train)
+print("best params:", grid_search.best_params_, "\n\n")
+#grid_search.cv_results_
+
+end_time = time.time()
+
+def timer(start,end):
+    hours, rem = divmod(end-start, 3600)
+    minutes, seconds = divmod(rem, 60)
+    print("{:0>2}:{:0>2}:{:05.2f}".format(int(hours),int(minutes),seconds))
+
+timer(start_time, end_time)
+
+grid_search.cv_results_
 
 
 
